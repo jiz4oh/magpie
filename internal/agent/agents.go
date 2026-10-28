@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/yetone/magpie/internal/appdir"
@@ -446,6 +448,13 @@ func magpieProviderJSONAt(shape, catalog, gw string) any {
 				e["reasoning"] = true
 			}
 			e["variants"] = openCodeVariants(m.Efforts, m.CodexFast)
+			// a gpt-6+ model goes through @ai-sdk/openai, on Responses: there
+			// OpenCode keeps a session's first effort and sends a later change
+			// as a configuration_update item, with a stable prompt_cache_key,
+			// so changing effort keeps the cache; on Chat a change misses (#3145)
+			if openCodeResponses(m.ID) {
+				e["provider"] = map[string]any{"npm": "@ai-sdk/openai"}
+			}
 			ms[m.ID] = e
 		}
 		return map[string]any{"npm": "@ai-sdk/openai-compatible", "name": "magpie",
@@ -491,6 +500,22 @@ func magpieProviderJSONAt(shape, catalog, gw string) any {
 			"compat": map[string]any{"sendSessionAffinityHeaders": true}, "models": ms}
 	}
 	return nil
+}
+
+// openCodeGPT is OpenCode's own test for a GPT model's major version
+// (packages/ai/src/protocols/openai-responses.ts).
+var openCodeGPT = regexp.MustCompile(`(?i)(?:^|/)gpt-(\d+)(?:\.\d+)?(?:-|$)`)
+
+// openCodeResponses says OpenCode is to reach model id on Responses: a
+// gpt-6 or later, the models OpenCode sends effort changes to as
+// configuration_update items there (#3145).
+func openCodeResponses(id string) bool {
+	m := openCodeGPT.FindStringSubmatch(id)
+	if m == nil {
+		return false
+	}
+	n, err := strconv.Atoi(m[1])
+	return err == nil && n >= 6
 }
 
 // piBlockKept is theirsKept for magpie's provider in a Pi models.json at
